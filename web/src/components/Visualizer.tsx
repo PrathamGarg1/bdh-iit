@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Terminal, Cpu, Database, Network, BrainCircuit, Sparkles } from "lucide-react";
+import { motion } from "framer-motion";
+import { Terminal, BrainCircuit, Sparkles, Database } from "lucide-react";
+import { SparseBrain } from "./SparseBrain";
+import { GraphBrain } from "./GraphBrain";
 
 interface Activation {
   id: string;
@@ -14,7 +16,9 @@ interface BDHStepData {
   layer: number;
   x_sparse: Activation[];
   y_sparse: Activation[];
+  x_dense?: Activation[];
   semantics?: Record<string, string>;
+  topology_links?: Array<{source: string, target: string, weight: number}>;
 }
 
 export function Visualizer() {
@@ -68,30 +72,42 @@ export function Visualizer() {
       const data = await res.json();
       console.log("Reinforced!", data);
       setCorrectToken("");
-      // re-trigger the stream to see updated activations
-      setIsProcessing(true);
+      // Add a slight delay to allow the user to see the visual edge thickening animation
+      setTimeout(() => setIsProcessing(true), 1500);
     } catch (e) {
       console.error(e);
     } finally {
-      setIsReinforcing(false);
+      setTimeout(() => setIsReinforcing(false), 1500);
     }
   };
 
   const currentData = dataStream[dataStream.length - 1];
+  const activeActivations = currentData?.x_sparse || [];
 
   return (
-    <div className="w-full max-w-7xl mx-auto flex flex-col gap-6">
+    <div className="w-full max-w-[1400px] mx-auto flex flex-col gap-16">
       
-      {/* Interactive Inputs */}
-      <div className="glass p-6 rounded-2xl flex flex-col lg:flex-row gap-6 items-center border border-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.1)]">
-        <div className="flex-1 w-full">
-          <label className="text-sm font-semibold text-blue-300 mb-2 flex items-center gap-2">
-            <Terminal size={16} /> Inference Stream (Live)
+      {/* 
+        ========================================
+        SECTION 1: Master Inference Engine Input 
+        ========================================
+      */}
+      <div className="glass p-10 rounded-3xl flex flex-col xl:flex-row gap-12 items-center border border-white/10 shadow-[0_40px_100px_-20px_rgba(0,0,0,0.8)] relative z-20 overflow-hidden">
+        
+        {/* Subtle background glow for the console */}
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-[100px] pointer-events-none -translate-y-1/2 translate-x-1/2" />
+
+        <div className="flex-[2] w-full relative z-10">
+          <label className="text-xl font-bold text-white mb-4 flex items-center gap-3">
+            <Terminal size={24} className="text-blue-400" /> Pathway Streaming Engine
           </label>
+          <p className="text-gray-400 mb-6 text-sm">
+            Type any sequence. Watch the characters get routed live to the Modal T4 GPU backend.
+          </p>
           <input
             type="text"
-            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-colors"
-            placeholder="Type text for BDH to process..."
+            className="w-full bg-black/50 border border-white/20 rounded-2xl px-6 py-5 text-white focus:outline-none focus:border-blue-500 transition-colors text-2xl font-mono shadow-inner"
+            placeholder="Initialize token stream..."
             value={inputText}
             onChange={(e) => {
               setInputText(e.target.value);
@@ -100,121 +116,127 @@ export function Visualizer() {
           />
         </div>
 
-        <div className="flex-1 w-full border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-6">
-          <label className="text-sm font-semibold text-emerald-400 mb-2 flex items-center gap-2">
-            <BrainCircuit size={16} /> Inference-Time Learning (Hebbian Update)
+        <div className="flex-[1.5] w-full border-t xl:border-t-0 xl:border-l border-white/10 pt-10 xl:pt-0 xl:pl-10 relative z-10">
+          <label className="text-xl font-bold text-emerald-400 mb-4 flex items-center gap-3">
+            <BrainCircuit size={24} /> Continuous Hebbian Update
           </label>
-          <div className="flex gap-2">
+          <p className="text-gray-400 mb-6 text-sm">
+            Intercept inference locally. Force the model to learn the next correct token via an instant AdamW gradient step.
+          </p>
+          <div className="flex gap-4">
             <input
               type="text"
               maxLength={1}
-              className="w-16 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-center focus:outline-none focus:border-emerald-500 transition-colors"
-              placeholder="Next"
+              className="w-24 bg-black/50 border border-white/20 rounded-2xl px-4 py-5 text-emerald-400 text-center focus:outline-none focus:border-emerald-500 transition-colors text-3xl font-bold shadow-inner"
+              placeholder="?"
               value={correctToken}
               onChange={(e) => setCorrectToken(e.target.value)}
             />
             <button
               onClick={handleReinforce}
               disabled={isReinforcing || !inputText || !correctToken}
-              className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/50 rounded-xl px-4 py-3 font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 rounded-2xl px-6 py-5 font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-3 text-lg"
             >
-              <Sparkles size={16} /> 
-              {isReinforcing ? "Updating Graph..." : "Reinforce Connection"}
+              <Sparkles size={20} /> 
+              {isReinforcing ? "Rewiring Topology..." : "Inject Weights"}
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-2">Permanently alters the model weights in real-time without backprop.</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Graph Visualizer */}
-        <div className="col-span-2 glass rounded-2xl p-6 min-h-[500px] flex flex-col relative overflow-hidden">
-          <div className="flex items-center gap-2 text-sm font-semibold text-white/70 mb-6 z-10">
-            <Network size={16} className="text-blue-400" /> Monosemantic Sparse Graph
-          </div>
-          
-          <div className="flex-1 flex items-center justify-center z-10">
-            {currentData ? (
-              <div className="grid grid-cols-8 sm:grid-cols-8 gap-3 w-full max-w-3xl">
-                <AnimatePresence>
-                  {currentData.x_sparse.map((act) => {
-                    const isActive = act.value > 0;
-                    const semanticLabel = currentData.semantics?.[act.id];
-                    return (
-                      <motion.div
-                        key={act.id}
-                        initial={{ opacity: 0.2, scale: 0.8 }}
-                        animate={{
-                          opacity: isActive ? 1 : 0.15,
-                          scale: isActive ? 1.05 : 1,
-                          backgroundColor: isActive ? "rgba(16, 185, 129, 0.4)" : "rgba(255, 255, 255, 0.02)",
-                          borderColor: isActive ? "rgba(16, 185, 129, 0.8)" : "rgba(255, 255, 255, 0.05)",
-                        }}
-                        transition={{ duration: 0.3 }}
-                        className="relative aspect-square rounded-xl border flex flex-col items-center justify-center"
-                      >
-                        {isActive && semanticLabel && (
-                          <motion.div 
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="absolute -top-8 bg-black/80 border border-emerald-500/30 text-emerald-400 text-[10px] px-2 py-1 rounded-md whitespace-nowrap z-50 backdrop-blur-sm"
-                          >
-                            {semanticLabel}
-                          </motion.div>
-                        )}
-                        <span className="text-[10px] text-white/20">{act.id}</span>
-                        {isActive && (
-                          <span className="text-xs text-emerald-300 font-mono font-bold">
-                            {act.value.toFixed(2)}
-                          </span>
-                        )}
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
-            ) : (
-              <div className="text-white/30 text-center text-sm font-mono flex flex-col items-center gap-4">
-                <Cpu size={32} className="opacity-50" />
-                Awaiting tokens...
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* Live Tensor Stream Data */}
-        <div className="glass rounded-2xl p-6 flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white/70">
-              <Database size={16} className="text-purple-400" /> Pathway Telemetry
+      {/* 
+        ========================================
+        SECTION 2: The Core Visualizers Extracted
+        ========================================
+      */}
+      <div className="flex flex-col gap-16">
+        
+        {/* Row 1: The Sparse Brain (Full Width) */}
+        <section className="w-full">
+          <div className="mb-6 pl-2 border-l-4 border-blue-500">
+            <h2 className="text-2xl font-black text-white">1. Activation Density Analysis</h2>
+            <div className="mt-3 bg-blue-950/20 border border-blue-500/20 rounded-xl p-4">
+              <p className="text-blue-100 font-medium mb-2">💡 In Beginner Terms:</p>
+              <p className="text-gray-400 text-sm leading-relaxed">
+                Imagine a massive stadium where <strong>every single person shouts at the exact same time</strong> to answer a question. That is a Standard Transformer (noisy, computationally heavy, 100% dense). <br/><br/>
+                Now imagine a quiet room where <strong>only 5 specific experts speak up</strong> because they know the answer. That is the BDH "Sparse" model. It naturally shuts off 95% of its brain to save massive amounts of compute power, while staying highly accurate.
+              </p>
             </div>
           </div>
-          <div className="flex-1 bg-black/60 rounded-xl p-4 font-mono text-xs text-blue-400 overflow-y-auto max-h-[420px] shadow-inner">
-            {dataStream.length > 0 ? (
-              dataStream.slice().reverse().map((d, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="mb-4 pb-4 border-b border-blue-900/40 last:border-0"
-                >
-                  <div className="text-white/80 font-bold mb-2">Token: "{d.token}"</div>
-                  <div className="text-purple-300">&#123;</div>
-                  <div className="pl-4">"layer": {d.layer},</div>
-                  <div className="pl-4">"sparsity": "{((64 - d.x_sparse.filter(x => x.value > 0).length) / 64 * 100).toFixed(1)}%",</div>
-                  <div className="pl-4">"active_neurons": {d.x_sparse.filter(x => x.value > 0).length},</div>
-                  <div className="pl-4 text-emerald-400">"semantic_shifts": {Object.keys(d.semantics || {}).length}</div>
-                  <div className="text-purple-300">&#125;</div>
-                </motion.div>
-              ))
-            ) : (
-              <div className="text-blue-900/50">waiting for payload...</div>
-            )}
+          <div className="w-full">
+            <SparseBrain 
+              bdhActivations={activeActivations} 
+              transformerActivations={currentData?.x_dense || []}
+            />
           </div>
-        </div>
+        </section>
+
+        {/* Row 2: Topology Graph & Telemetry Split */}
+        <section className="w-full grid grid-cols-1 xl:grid-cols-4 gap-12">
+          
+          <div className="xl:col-span-3">
+            <div className="mb-6 pl-2 border-l-4 border-emerald-500">
+              <h2 className="text-2xl font-black text-white">2. Emergent Scale-Free Topology</h2>
+              <div className="mt-3 bg-emerald-950/20 border border-emerald-500/20 rounded-xl p-4">
+                <p className="text-emerald-100 font-medium mb-2">💡 In Beginner Terms:</p>
+                <p className="text-gray-400 text-sm leading-relaxed mb-3">
+                  Unlike traditional AI that forces data through rigid rectangle grids, this model grows organically like a real human brain. Notice how it looks like a web? It creates <strong>"Hubs"</strong> (like major airports connecting cities) to route information efficiently.
+                </p>
+                <p className="text-gray-400 text-sm leading-relaxed">
+                  <strong>The Magic:</strong> When you intercept the model and click "Inject Weights" above, you trigger <em>Hebbian Learning</em>. If two neurons blink together, the line connecting them structurally becomes thicker. It learned a new connection instantly, permanently altering its own brain!
+                </p>
+              </div>
+            </div>
+            
+            <GraphBrain 
+              bdhActivations={activeActivations} 
+              isReinforcing={isReinforcing}
+              semantics={currentData?.semantics}
+              topologyLinks={currentData?.topology_links || []}
+            />
+          </div>
+
+          <div className="xl:col-span-1 flex flex-col h-full">
+            <div className="mb-6 pl-2 border-l-4 border-purple-500">
+              <h2 className="text-2xl font-black text-white">3. Telemetry River</h2>
+              <p className="text-gray-400 mt-2">Real-time Pathway ingest.</p>
+            </div>
+            
+            <div className="glass rounded-2xl p-6 flex flex-col flex-1 min-h-[400px]">
+              <div className="flex items-center gap-2 text-sm font-bold text-purple-300 mb-6 uppercase tracking-widest border-b border-white/10 pb-4">
+                <Database size={18} /> Packet Data
+              </div>
+              <div className="flex-1 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
+                {dataStream.length > 0 ? (
+                  dataStream.slice().reverse().map((d, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      className="mb-4 pb-4 border-b border-purple-900/30 last:border-0 bg-black/40 rounded-xl p-4 shadow-sm"
+                    >
+                      <div className="text-white font-extrabold mb-3 text-lg border-b border-white/10 pb-2">
+                        Token: <span className="text-emerald-400">"{d.token}"</span>
+                      </div>
+                      <div className="font-mono text-xs text-purple-200/80 space-y-1.5 pl-2 border-l-2 border-purple-500/30">
+                        <div>Layer: <span className="text-white/90">{d.layer}</span></div>
+                        <div>Sparsity: <span className="text-emerald-400 font-bold">{((64 - d.x_sparse.filter(x => x.value > 0).length) / 64 * 100).toFixed(1)}%</span></div>
+                        <div>Active H: <span className="text-white/90">{d.x_sparse.filter(x => x.value > 0).length}</span></div>
+                        <div>Sem Shifts: <span className="text-white/90">{Object.keys(d.semantics || {}).length}</span></div>
+                      </div>
+                    </motion.div>
+                  ))
+                ) : (
+                  <div className="text-purple-900/50 font-mono text-center mt-10">waiting for payload...</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+        </section>
+
       </div>
     </div>
   );
 }
-

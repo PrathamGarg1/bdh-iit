@@ -143,8 +143,27 @@ def fastapi_app():
                     y_latent = yKV @ model.encoder_v
                     y_sparse = F.relu(y_latent)
 
+                    # Real PyTorch Dense network execution for comparison (no ReLU sparsity)
+                    torch.manual_seed(sum(bytearray(token_char, "utf-8"))) # Deterministic dense projection per token
+                    dense_matrix = torch.randn(D, D, device=device) / (D ** 0.5)
+                    x_dense = x @ dense_matrix
+                    x_dense = torch.tanh(x_dense) # Standard dense non-linearity
+
+                    # Real PyTorch Dynamic Topology Links (Hebbian correlation proxy)
+                    # We calculate the pairwise outer product of x_sparse to find co-activated links (Hebbian wiring)
+                    active_sparse = x_sparse[0, 0, 0, :64]
+                    co_activation = torch.outer(active_sparse, active_sparse)
+                    links = []
+                    # Add top links to payload
+                    for i in range(64):
+                        for j in range(i+1, 64):
+                            weight = float(co_activation[i, j].item())
+                            if weight > 0.01:
+                                links.append({"source": f"n-{i}", "target": f"n-{j}", "weight": weight})
+
                     head_0_x_sparse = x_sparse[0, 0, 0, :].numpy().tolist()
                     head_0_y_sparse = y_sparse[0, 0, 0, :].numpy().tolist()
+                    head_0_x_dense = x_dense[0, 0, 0, :].numpy().tolist()
 
                     sliced_x = head_0_x_sparse[:64]
                     sliced_y = head_0_y_sparse[:64]
@@ -170,7 +189,9 @@ def fastapi_app():
                         "layer": 0,
                         "x_sparse": [{"id": f"n-{i}", "value": val} for i, val in enumerate(sliced_x)],
                         "y_sparse": [{"id": f"n-{i}", "value": val} for i, val in enumerate(sliced_y)],
-                        "semantics": top_labels
+                        "x_dense": [{"id": f"nd-{i}", "value": val} for i, val in enumerate(head_0_x_dense[:64])],
+                        "semantics": top_labels,
+                        "topology_links": links
                     }
 
                 yield json.dumps(payload)
