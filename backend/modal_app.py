@@ -1,7 +1,5 @@
 import modal
-from pathlib import Path
 import json
-import asyncio
 
 app = modal.App("bdh-explainer-backend")
 
@@ -22,8 +20,8 @@ image = (
     .run_commands("git clone https://github.com/pathwaycom/bdh.git /root/bdh")
 )
 
-# A volume to store trained checkpoints
 volume = modal.Volume.from_name("bdh-checkpoints", create_if_missing=True)
+
 
 @app.function(image=image, volumes={"/vol": volume}, timeout=3600, gpu="T4")
 def train_tiny_model():
@@ -39,7 +37,9 @@ def train_tiny_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training on device: {device}")
 
-    BDH_CONFIG = bdh.BDHConfig(n_layer=2, n_embd=64, n_head=2, mlp_internal_dim_multiplier=16, vocab_size=256)
+    BDH_CONFIG = bdh.BDHConfig(
+        n_layer=2, n_embd=64, n_head=2, mlp_internal_dim_multiplier=16, vocab_size=256
+    )
     model = bdh.BDH(BDH_CONFIG).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
@@ -57,8 +57,12 @@ def train_tiny_model():
     model.train()
     for step in range(MAX_ITERS):
         ix = torch.randint(len(data) - BLOCK_SIZE, (BATCH_SIZE,))
-        x = torch.stack([torch.from_numpy((data[i : i + BLOCK_SIZE]).astype(np.int64)) for i in ix]).to(device)
-        y = torch.stack([torch.from_numpy((data[i + 1 : i + 1 + BLOCK_SIZE]).astype(np.int64)) for i in ix]).to(device)
+        x = torch.stack(
+            [torch.from_numpy((data[i : i + BLOCK_SIZE]).astype(np.int64)) for i in ix]
+        ).to(device)
+        y = torch.stack(
+            [torch.from_numpy((data[i + 1 : i + 1 + BLOCK_SIZE]).astype(np.int64)) for i in ix]
+        ).to(device)
 
         logits, loss = model(x, y)
         loss.backward()
@@ -66,7 +70,7 @@ def train_tiny_model():
         optimizer.zero_grad()
 
         if step % 50 == 0:
-            print(f"Step {step}, Loss {loss.item()}")
+            print(f"Step {step}, Loss {loss.item():.4f}")
 
     checkpoint_path = "/vol/bdh_tiny.pt"
     torch.save(model.state_dict(), checkpoint_path)
@@ -81,14 +85,11 @@ def fastapi_app():
     from fastapi import FastAPI, Query, Body
     from fastapi.middleware.cors import CORSMiddleware
     from sse_starlette.sse import EventSourceResponse
-    import pathway as pw
     import sys
     sys.path.append("/root/bdh")
     import bdh
     import torch
     import torch.nn.functional as F
-    import json
-    import asyncio
     import numpy as np
     from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
@@ -103,8 +104,10 @@ def fastapi_app():
 
     device = torch.device("cpu")
 
-    # ── BDH (tiny, char-level, byte vocab) ──────────────────────────────────
-    BDH_CONFIG = bdh.BDHConfig(n_layer=2, n_embd=64, n_head=2, mlp_internal_dim_multiplier=16, vocab_size=256)
+    # ── BDH (tiny, 2-layer, byte-level, vocab=256) ───────────────────────────
+    BDH_CONFIG = bdh.BDHConfig(
+        n_layer=2, n_embd=64, n_head=2, mlp_internal_dim_multiplier=16, vocab_size=256
+    )
     model = bdh.BDH(BDH_CONFIG).to(device)
     model.eval()
 
@@ -112,124 +115,161 @@ def fastapi_app():
     try:
         volume.reload()
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-        print("Successfully loaded BDH weights from Volume!")
+        print("✅ BDH weights loaded from checkpoint.")
     except Exception as e:
-        print("Could not load BDH weights.", e)
+        print(f"⚠️  Could not load BDH weights: {e}. Using random init.")
 
-    # ── GPT-2 Small (124M, real dense transformer) ───────────────────────────
-    print("Loading GPT-2 small (124M params)…")
+    # ── GPT-2 Small (124M, OpenAI) ───────────────────────────────────────────
+    print("Loading GPT-2 small (124M)…")
     gpt2_tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     gpt2_model = GPT2LMHeadModel.from_pretrained("gpt2")
     gpt2_model.eval()
-    print("GPT-2 loaded.")
+    print("✅ GPT-2 loaded.")
 
-    neuron_semantics = {}
+    neuron_semantics: dict = {}
 
     @web_app.get("/stream")
     async def stream_activations(prompt: str = Query(default="Hey")):
         async def event_generator():
-            for token_char in prompt:
+            for char_idx, token_char in enumerate(prompt):
+                import asyncio
                 await asyncio.sleep(0.3)
 
-                # ── BDH Forward Pass ────────────────────────────────────────
-                idx = torch.tensor(bytearray(token_char, "utf-8"), dtype=torch.long, device=device).unsqueeze(0)
+                # ── Accumulated context up to (and including) this character ──
+                context = prompt[: char_idx + 1]
 
+                # ════════════════════════════════════════════════════════════
+                # BDH INFERENCE — uses full 2-layer model, full context
+                # ════════════════════════════════════════════════════════════
                 with torch.no_grad():
-                    B, T = idx.size()
-                    D = BDH_CONFIG.n_embd        # 64
-                    nh = BDH_CONFIG.n_head       # 2
-                    N = D * BDH_CONFIG.mlp_internal_dim_multiplier // nh  # 512
+                    # Encode the whole context as raw bytes (vocab=256)
+                    bdh_bytes = torch.tensor(
+                        list(context.encode("utf-8")), dtype=torch.long, device=device
+                    ).unsqueeze(0)  # [1, T]
 
-                    x = model.embed(idx).unsqueeze(1)
-                    x = model.ln(x)
-
-                    x_latent = x @ model.encoder
-                    x_sparse = F.relu(x_latent)   # [1, 2, 1, 512]  ~95% zeros
-                    yKV = model.attn(Q=x_sparse, K=x_sparse, V=x)
-                    yKV = model.ln(yKV)
-
-                    y_latent = yKV @ model.encoder_v
-                    y_sparse = F.relu(y_latent)
-
-                    # BDH prediction
-                    x_out = model.ln(x + model.ln((x_sparse * y_sparse).transpose(1, 2).reshape(B, 1, T, N * nh) @ model.decoder))
-                    bdh_logits = x_out.view(1, 1, D) @ model.lm_head   # [1, 1, 256]
-                    bdh_probs = F.softmax(bdh_logits[0, -1, :], dim=-1)
+                    # ── Correct full-model prediction ──────────────────────
+                    # model.forward() runs ALL n_layer=2 layers correctly,
+                    # including the assert K is Q constraint.
+                    bdh_logits_all, _ = model(bdh_bytes)  # [1, T, 256]
+                    bdh_last = bdh_logits_all[0, -1, :]   # logits for next byte [256]
+                    bdh_probs = F.softmax(bdh_last, dim=-1)
                     bdh_top5 = torch.topk(bdh_probs, 5)
                     bdh_prediction = {
-                        "model": "BDH (Tiny, 2-layer, byte-level)",
+                        "model": "BDH (pathwaycom/bdh, 2-layer, byte-level)",
                         "top_chars": [
                             chr(i) if 32 <= i < 127 else f"[{i}]"
                             for i in bdh_top5.indices.tolist()
                         ],
-                        "top_probs": [round(float(p), 4) for p in bdh_top5.values.tolist()],
+                        "top_probs": [
+                            round(float(p), 4) for p in bdh_top5.values.tolist()
+                        ],
                     }
 
-                    # BDH Hebbian topology
-                    active_sparse = x_sparse[0, 0, 0, :64]
+                    # ── Layer-0 sparse activations (for SparseBrain / GraphBrain) ──
+                    # Manually run layer 0 to capture x_sparse BEFORE the loop updates x.
+                    # Note: model.attn asserts K is Q (same object), so we pass the
+                    # same tensor for both Q and K.
+                    B, T = bdh_bytes.size()
+                    D = BDH_CONFIG.n_embd        # 64
+                    nh = BDH_CONFIG.n_head       # 2
+                    N = D * BDH_CONFIG.mlp_internal_dim_multiplier // nh  # 512
+
+                    x_vis = model.embed(bdh_bytes).unsqueeze(1)  # [1, 1, T, 64]
+                    x_vis = model.ln(x_vis)
+
+                    x_latent = x_vis @ model.encoder               # [1, 2, T, 512]
+                    x_sparse = F.relu(x_latent)                    # sparse! ~95% zeros
+
+                    # Attention: K is Q (same object) — BDH requires this
+                    y_kv = model.attn(Q=x_sparse, K=x_sparse, V=x_vis)
+                    y_kv = model.ln(y_kv)
+
+                    y_latent = y_kv @ model.encoder_v              # [1, 2, T, 512]
+                    y_sparse = F.relu(y_latent)
+
+                    # Visualise the LAST token's activations (most current char)
+                    sliced_x = x_sparse[0, 0, -1, :64].tolist()   # head 0, last pos
+                    sliced_y = y_sparse[0, 0, -1, :64].tolist()
+
+                    # Hebbian co-activation links for the topology graph
+                    active_sparse = x_sparse[0, 0, -1, :64]
                     co_activation = torch.outer(active_sparse, active_sparse)
                     links = []
                     for i in range(64):
                         for j in range(i + 1, 64):
-                            weight = float(co_activation[i, j].item())
-                            if weight > 0.01:
-                                links.append({"source": f"n-{i}", "target": f"n-{j}", "weight": weight})
+                            w = float(co_activation[i, j].item())
+                            if w > 0.01:
+                                links.append({
+                                    "source": f"n-{i}",
+                                    "target": f"n-{j}",
+                                    "weight": w,
+                                })
 
-                    head_0_x_sparse = x_sparse[0, 0, 0, :].numpy().tolist()
-                    head_0_y_sparse = y_sparse[0, 0, 0, :].numpy().tolist()
-
-                    sliced_x = head_0_x_sparse[:64]
-                    sliced_y = head_0_y_sparse[:64]
-
-                    # Track neuron semantics
-                    active_indices = [i for i, val in enumerate(sliced_x) if val > 0]
+                    # Neuron semantics: track what char each neuron fires for
+                    active_indices = [i for i, v in enumerate(sliced_x) if v > 0]
                     for i in active_indices:
-                        if i not in neuron_semantics:
-                            neuron_semantics[i] = {}
-                        neuron_semantics[i][token_char] = neuron_semantics[i].get(token_char, 0) + 1
+                        neuron_semantics.setdefault(i, {})
+                        neuron_semantics[i][token_char] = (
+                            neuron_semantics[i].get(token_char, 0) + 1
+                        )
 
                     top_labels = {}
                     for i in active_indices:
-                        if i in neuron_semantics and neuron_semantics[i]:
-                            best_char = max(neuron_semantics[i].items(), key=lambda item: item[1])[0]
-                            top_labels[f"n-{i}"] = f"'{best_char}' detector"
+                        if neuron_semantics.get(i):
+                            best = max(
+                                neuron_semantics[i].items(), key=lambda kv: kv[1]
+                            )[0]
+                            top_labels[f"n-{i}"] = f"'{best}' detector"
 
-                # ── GPT-2 Forward Pass ───────────────────────────────────────
+                # ════════════════════════════════════════════════════════════
+                # GPT-2 INFERENCE — full accumulated context, 50257-token vocab
+                # ════════════════════════════════════════════════════════════
                 with torch.no_grad():
-                    # Tokenize the character (GPT-2 uses BPE, may map char to 1+ tokens)
-                    gpt2_inputs = gpt2_tokenizer(token_char, return_tensors="pt")
+                    # Tokenize the whole accumulated context (BPE)
+                    gpt2_inputs = gpt2_tokenizer(context, return_tensors="pt")
                     gpt2_out = gpt2_model(
                         **gpt2_inputs,
                         output_hidden_states=True,
                     )
 
-                    # Real dense activations: hidden state of layer 1, last token, first 64 dims
-                    # GPT-2 hidden size = 768; these are GELU-activated, ALL non-zero (dense)
-                    gpt2_hidden_layer1 = gpt2_out.hidden_states[1][0, -1, :64]  # [64]
-                    # Normalize to [-1, 1] range for display
-                    max_val = gpt2_hidden_layer1.abs().max().clamp(min=1e-6)
-                    gpt2_activations_norm = (gpt2_hidden_layer1 / max_val).tolist()
-
-                    # GPT-2 top-5 next token predictions
-                    gpt2_logits = gpt2_out.logits[0, -1, :]
-                    gpt2_probs = F.softmax(gpt2_logits, dim=-1)
+                    # Predict the next BPE token given all context seen so far
+                    gpt2_last_logits = gpt2_out.logits[0, -1, :]   # [50257]
+                    gpt2_probs = F.softmax(gpt2_last_logits, dim=-1)
                     gpt2_top5 = torch.topk(gpt2_probs, 5)
                     gpt2_prediction = {
-                        "model": "GPT-2 (124M, BPE, GELU-dense)",
+                        "model": "GPT-2 Small (124M, OpenAI, BPE)",
                         "top_chars": [
-                            gpt2_tokenizer.decode([i]).strip() or f"[{i}]"
-                            for i in gpt2_top5.indices.tolist()
+                            # decode each token id; strip whitespace for display
+                            (gpt2_tokenizer.decode([tid]).strip() or f"[{tid}]")
+                            for tid in gpt2_top5.indices.tolist()
                         ],
-                        "top_probs": [round(float(p), 4) for p in gpt2_top5.values.tolist()],
+                        "top_probs": [
+                            round(float(p), 4) for p in gpt2_top5.values.tolist()
+                        ],
                     }
+
+                    # Real dense GELU activations from GPT-2 hidden layer 1
+                    # GPT-2 hidden_size=768; slice first 64 dims for display
+                    gpt2_h1 = gpt2_out.hidden_states[1][0, -1, :64]  # [64]
+                    max_v = gpt2_h1.abs().max().clamp(min=1e-6)
+                    gpt2_norm = (gpt2_h1 / max_v).tolist()   # normalised to [-1, 1]
 
                 payload = {
                     "token": token_char,
                     "layer": 0,
-                    "x_sparse": [{"id": f"n-{i}", "value": val} for i, val in enumerate(sliced_x)],
-                    "y_sparse": [{"id": f"n-{i}", "value": val} for i, val in enumerate(sliced_y)],
-                    # Real GPT-2 dense activations (GELU, all non-zero) replace the old fake matrix
-                    "x_dense": [{"id": f"nd-{i}", "value": val} for i, val in enumerate(gpt2_activations_norm)],
+                    "x_sparse": [
+                        {"id": f"n-{i}", "value": v}
+                        for i, v in enumerate(sliced_x)
+                    ],
+                    "y_sparse": [
+                        {"id": f"n-{i}", "value": v}
+                        for i, v in enumerate(sliced_y)
+                    ],
+                    # Real GPT-2 GELU dense activations (all non-zero)
+                    "x_dense": [
+                        {"id": f"nd-{i}", "value": v}
+                        for i, v in enumerate(gpt2_norm)
+                    ],
                     "semantics": top_labels,
                     "topology_links": links,
                     "prediction": bdh_prediction,
@@ -238,13 +278,14 @@ def fastapi_app():
 
                 yield json.dumps(payload)
             yield "[DONE]"
+
         return EventSourceResponse(event_generator())
 
     @web_app.post("/reinforce")
     async def reinforce(payload: dict = Body(...)):
         """
-        Inference-Time Continuous Learning
-        Executes a real-time weight update (Hebbian simulation via SGD) without needing a full dataset.
+        Inference-Time Continuous Learning via a single AdamW gradient step.
+        Updates only the BDH model (GPT-2 is not fine-tuned here).
         """
         prompt = payload.get("prompt", "a")
         correct_token = payload.get("correct_token", "b")
@@ -252,11 +293,13 @@ def fastapi_app():
         model.train()
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.05)
 
-        input_text = prompt
-        target_text = input_text[1:] + correct_token
-
-        ix = torch.tensor(bytearray(input_text, "utf-8"), dtype=torch.long, device=device).unsqueeze(0)
-        iy = torch.tensor(bytearray(target_text, "utf-8"), dtype=torch.long, device=device).unsqueeze(0)
+        target_text = prompt[1:] + correct_token
+        ix = torch.tensor(
+            list(prompt.encode("utf-8")), dtype=torch.long, device=device
+        ).unsqueeze(0)
+        iy = torch.tensor(
+            list(target_text.encode("utf-8")), dtype=torch.long, device=device
+        ).unsqueeze(0)
 
         logits, loss = model(ix, iy)
         loss.backward()
@@ -267,6 +310,6 @@ def fastapi_app():
         torch.save(model.state_dict(), checkpoint_path)
         volume.commit()
 
-        return {"status": "success", "loss": float(loss.item())}
+        return {"status": "success", "loss": round(float(loss.item()), 4)}
 
     return web_app
