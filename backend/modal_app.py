@@ -50,9 +50,9 @@ def train_tiny_model():
             f.write(requests.get(data_url).text)
 
     data = np.memmap(input_file_path, dtype=np.uint8, mode="r")
-    BLOCK_SIZE = 64
-    BATCH_SIZE = 16
-    MAX_ITERS = 200
+    BLOCK_SIZE = 256
+    BATCH_SIZE = 32
+    MAX_ITERS = 4000
 
     model.train()
     for step in range(MAX_ITERS):
@@ -69,7 +69,7 @@ def train_tiny_model():
         optimizer.step()
         optimizer.zero_grad()
 
-        if step % 50 == 0:
+        if step % 200 == 0:
             print(f"Step {step}, Loss {loss.item():.4f}")
 
     checkpoint_path = "/vol/bdh_tiny.pt"
@@ -136,8 +136,10 @@ def fastapi_app():
                 await asyncio.sleep(0.3)
 
                 # ── Accumulated context up to (and including) this character ──
-                # Capped at 64 bytes to perfectly match the training BLOCK_SIZE
-                context = prompt[: char_idx + 1][-64:]
+                # Capped at 128 bytes. The model is trained on BLOCK_SIZE=256,
+                # so this allows up to 128 bytes of context + 15 generated tokens
+                # well within the trained length, avoiding RoPE extrapolation errors.
+                context = prompt[: char_idx + 1][-128:]
 
                 # ════════════════════════════════════════════════════════════
                 # BDH INFERENCE — uses full 2-layer model, full context
