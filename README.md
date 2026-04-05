@@ -1,6 +1,6 @@
 <div align="center">
   <img src="https://pathway.com/logo.svg" height="80" alt="Pathway Logo" />
-  <h1>The Burn Dragon Hatchling (BDH) Explainer</h1>
+  <h1>The Baby Dragon Hatchling (BDH) Explainer</h1>
   <p><h3>The definitive interactive visualizer for post-transformer architectures.</h3></p>
   <i>The "Georgia Tech Transformer Explainer" equivalent for the BDH era. Designed for the Path A "Visualization and Inner Worlds" Track.</i>
 </div>
@@ -8,7 +8,7 @@
 ---
 
 ## 🏆 Project Overview
-Transformers have reached their architectural ceiling—opaque dense matrices, zero temporal memory, and massive computational overhead. The **Burn Dragon Hatchling (BDH)** breaks this paradigm with sparse activations, scale-free graph topologies, and continual Hebbian learning. 
+Transformers have reached their architectural ceiling—opaque dense matrices, zero temporal memory, and massive computational overhead. The **Baby Dragon Hatchling (BDH)** breaks this paradigm with sparse activations, scale-free graph topologies, and continual Hebbian learning. 
 
 However, BDH's internals can be difficult to grasp. 
 **Our mission was simple:** Build the absolute best, most visceral, interactive browser-based visualization of BDH in existence, making its superiority instantly obvious to both executives and researchers.

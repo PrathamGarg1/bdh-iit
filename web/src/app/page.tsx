@@ -22,7 +22,7 @@ export default function Home() {
         </div>
 
         <h1 className="text-6xl md:text-8xl font-black tracking-tighter mb-8 text-transparent bg-clip-text bg-gradient-to-br from-slate-900 via-blue-900 to-blue-600 drop-shadow-sm pb-2">
-          Burn Dragon <br className="hidden md:block" /> Hatchling <span className="text-blue-500">Explorer</span>
+          Baby Dragon <br className="hidden md:block" /> Hatchling <span className="text-blue-500">Explorer</span>
         </h1>
         
         <p className="text-slate-500 text-xl md:text-2xl max-w-3xl font-light leading-relaxed mb-16">
