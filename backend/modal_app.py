@@ -137,15 +137,18 @@ def fastapi_app():
 
                 # ── Accumulated context up to (and including) this character ──
                 context = prompt[: char_idx + 1]
+                # BDH was trained on BLOCK_SIZE=64 — clamp to last 64 bytes
+                BLOCK_SIZE = 64
+                bdh_context = context[-BLOCK_SIZE:]
 
                 # ════════════════════════════════════════════════════════════
                 # BDH INFERENCE — uses full 2-layer model, full context
                 # ════════════════════════════════════════════════════════════
                 with torch.no_grad():
-                    # Encode the whole context as raw bytes (vocab=256)
+                    # Encode the last 64 bytes — BDH's training BLOCK_SIZE
                     bdh_bytes = torch.tensor(
-                        list(context.encode("utf-8")), dtype=torch.long, device=device
-                    ).unsqueeze(0)  # [1, T]
+                        list(bdh_context.encode("utf-8")), dtype=torch.long, device=device
+                    ).unsqueeze(0)  # [1, T] where T <= 64
 
                     # ── Correct full-model prediction ──────────────────────
                     # model.forward() runs ALL n_layer=2 layers correctly,
