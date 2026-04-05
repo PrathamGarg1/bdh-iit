@@ -52,7 +52,7 @@ def train_tiny_model():
     data = np.memmap(input_file_path, dtype=np.uint8, mode="r")
     BLOCK_SIZE = 256
     BATCH_SIZE = 32
-    MAX_ITERS = 4000
+    MAX_ITERS = 5000
 
     model.train()
     for step in range(MAX_ITERS):
