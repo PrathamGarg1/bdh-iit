@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --accent: #3b82f6;
-  --accent-glow: rgba(59, 130, 246, 0.5);
-  --neuron-inactive: rgba(255, 255, 255, 0.1);
-  --neuron-active: #10b981;
+  --background: #f4f6fb;
+  --foreground: #0f172a;
+  --glass-bg: rgba(255, 255, 255, 0.75);
+  --glass-border: rgba(148, 163, 184, 0.35);
+  --accent: #2563eb;
+  --accent-glow: rgba(37, 99, 235, 0.25);
+  --neuron-inactive: rgba(0, 0, 0, 0.07);
+  --neuron-active: #059669;
 }
 
 @theme inline {
@@ -20,9 +20,9 @@
 
 body {
   background: var(--background);
-  background-image: 
-    radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
-    radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15) 0%, transparent 50%);
+  background-image:
+    radial-gradient(circle at 15% 50%, rgba(37, 99, 235, 0.07) 0%, transparent 50%),
+    radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.07) 0%, transparent 50%);
   background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-sans), sans-serif;
@@ -34,4 +34,9 @@ body {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--glass-border);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.06);
 }
+
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 4px; }
