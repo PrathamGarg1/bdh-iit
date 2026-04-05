@@ -165,6 +165,15 @@ def fastapi_app():
                         ],
                     }
 
+                    # BDH continuation: generate next 15 bytes greedily (top_k=5)
+                    cont_tensor = model.generate(
+                        bdh_bytes, max_new_tokens=15, temperature=0.8, top_k=5
+                    )  # [1, T + 15]
+                    new_bytes = cont_tensor[0, bdh_bytes.size(1):].tolist()
+                    bdh_prediction["continuation"] = bytes(new_bytes).decode(
+                        "utf-8", errors="replace"
+                    )
+
                     # ── Layer-0 sparse activations (for SparseBrain / GraphBrain) ──
                     # Manually run layer 0 to capture x_sparse BEFORE the loop updates x.
                     # Note: model.attn asserts K is Q (same object), so we pass the

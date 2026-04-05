@@ -15,6 +15,7 @@ interface Prediction {
   model: string;
   top_chars: string[];
   top_probs: number[];
+  continuation?: string;
 }
 
 interface BDHStepData {
@@ -33,40 +34,73 @@ function PredictionCard({
   pred,
   accentClass,
   barClass,
+  showContinuation,
+  onToggleContinuation,
 }: {
   pred: Prediction;
   accentClass: string;
   barClass: string;
+  showContinuation?: boolean;
+  onToggleContinuation?: () => void;
 }) {
   return (
     <div className="flex-1 min-w-0">
-      <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${accentClass}`}>
-        {pred.model}
-      </p>
-      <div className="flex flex-col gap-2">
-        {pred.top_chars.map((ch, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <span
-              className={`font-mono font-black text-base w-10 text-right shrink-0 ${
-                i === 0 ? accentClass : "text-slate-400"
-              }`}
-            >
-              &quot;{ch}&quot;
-            </span>
-            <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden">
-              <motion.div
-                className={`h-2.5 rounded-full ${barClass}`}
-                initial={{ width: 0 }}
-                animate={{ width: `${pred.top_probs[i] * 100}%` }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
-              />
-            </div>
-            <span className="text-xs font-mono text-slate-400 w-10 shrink-0">
-              {(pred.top_probs[i] * 100).toFixed(1)}%
-            </span>
-          </div>
-        ))}
+      <div className="flex items-center justify-between mb-3">
+        <p className={`text-xs font-bold uppercase tracking-widest ${accentClass}`}>
+          {pred.model}
+        </p>
+        {onToggleContinuation && (
+          <button
+            onClick={onToggleContinuation}
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
+              showContinuation
+                ? "bg-emerald-100 border-emerald-400 text-emerald-700"
+                : "bg-slate-100 border-slate-300 text-slate-500 hover:border-slate-400"
+            }`}
+          >
+            {showContinuation ? "📖 Continuation" : "🔤 Next Byte"}
+          </button>
+        )}
       </div>
+
+      {showContinuation && pred.continuation !== undefined ? (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+          <p className="text-[10px] text-emerald-600 font-mono uppercase tracking-widest mb-2">
+            BDH generates next 15 chars →
+          </p>
+          <p className="font-mono text-lg font-bold text-emerald-800 break-all leading-relaxed">
+            &quot;{pred.continuation}&quot;
+          </p>
+          <p className="text-[10px] text-slate-400 mt-2">
+            temp=0.8, top_k=5 sampling from byte distribution
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {pred.top_chars.map((ch, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span
+                className={`font-mono font-black text-base w-10 text-right shrink-0 ${
+                  i === 0 ? accentClass : "text-slate-400"
+                }`}
+              >
+                &quot;{ch}&quot;
+              </span>
+              <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                <motion.div
+                  className={`h-2.5 rounded-full ${barClass}`}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${pred.top_probs[i] * 100}%` }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                />
+              </div>
+              <span className="text-xs font-mono text-slate-400 w-10 shrink-0">
+                {(pred.top_probs[i] * 100).toFixed(1)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -78,6 +112,8 @@ export function Visualizer() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReinforcing, setIsReinforcing] = useState(false);
   const [showNumbers, setShowNumbers] = useState(false);
+  const [showContinuation, setShowContinuation] = useState(false);
+  const [showInjectInfo, setShowInjectInfo] = useState(false);
 
   useEffect(() => {
     if (!isProcessing || inputText.length === 0) return;
@@ -161,9 +197,44 @@ export function Visualizer() {
         </div>
 
         <div className="flex-[1.5] w-full border-t xl:border-t-0 xl:border-l border-slate-200 pt-10 xl:pt-0 xl:pl-10 relative z-10">
-          <label className="text-xl font-bold text-emerald-700 mb-4 flex items-center gap-3">
-            <BrainCircuit size={24} /> Continuous Hebbian Update
-          </label>
+          <div className="flex items-center gap-2 mb-4">
+            <label className="text-xl font-bold text-emerald-700 flex items-center gap-3">
+              <BrainCircuit size={24} /> Continuous Hebbian Update
+            </label>
+            <button
+              onClick={() => setShowInjectInfo(!showInjectInfo)}
+              className="w-5 h-5 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-500 text-xs font-bold flex items-center justify-center transition-colors shrink-0"
+              title="How does Inject Weights work?"
+            >
+              i
+            </button>
+          </div>
+
+          {showInjectInfo && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-slate-600 leading-relaxed"
+            >
+              <p className="font-bold text-amber-700 mb-1">⚡ How Inject Weights Works</p>
+              <p>
+                Each click runs <strong>one AdamW gradient step</strong> (lr=0.05) on the live BDH model,
+                using your prompt as input and the correct token as the target. This slightly shifts the
+                model&apos;s internal weights toward predicting your chosen character.
+              </p>
+              <p className="mt-2">
+                <strong>Important:</strong> A single gradient step is a small nudge — not a guarantee.
+                The model has a strong prior from Tiny Shakespeare training. Your injected token may
+                appear in the top-5 but not necessarily rank #1, especially if the prior strongly
+                favored another byte. <strong>Repeat injections strengthen the connection progressively.</strong>
+              </p>
+              <p className="mt-2 text-slate-400">
+                Watch the Topology Graph — the edges between co-firing neurons will visibly thicken
+                after each injection, showing the Hebbian synaptic update in real-time.
+              </p>
+            </motion.div>
+          )}
+
           <p className="text-slate-500 mb-6 text-sm">
             Intercept inference. Force BDH to learn the next correct token via an instant AdamW gradient step.
           </p>
@@ -213,6 +284,8 @@ export function Visualizer() {
                   pred={currentData.prediction}
                   accentClass="text-emerald-700"
                   barClass="bg-emerald-500"
+                  showContinuation={showContinuation}
+                  onToggleContinuation={() => setShowContinuation(!showContinuation)}
                 />
               </div>
             ) : (
