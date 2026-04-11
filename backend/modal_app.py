@@ -52,7 +52,7 @@ def train_tiny_model():
     data = np.memmap(input_file_path, dtype=np.uint8, mode="r")
     BLOCK_SIZE = 256
     BATCH_SIZE = 32
-    MAX_ITERS = 5000
+    MAX_ITERS = 4000
 
     model.train()
     for step in range(MAX_ITERS):
@@ -200,38 +200,52 @@ def fastapi_app():
                     y_sparse = F.relu(y_latent)
 
                     # Visualise the LAST token's activations (most current char)
-                    sliced_x = x_sparse[0, 0, -1, :64].tolist()   # head 0, last pos
+                    # We take the first head (0) and first 64 sparse neurons
+                    sliced_x = x_sparse[0, 0, -1, :64].tolist()   
                     sliced_y = y_sparse[0, 0, -1, :64].tolist()
 
                     # Hebbian co-activation links for the topology graph
-                    active_sparse = x_sparse[0, 0, -1, :64]
-                    co_activation = torch.outer(active_sparse, active_sparse)
+                    # BDH interaction is between Input (X) and Prediction (Y)
                     links = []
                     for i in range(64):
-                        for j in range(i + 1, 64):
-                            w = float(co_activation[i, j].item())
-                            if w > 0.01:
+                        vx = sliced_x[i]
+                        if vx <= 0.01: continue
+                        for j in range(64):
+                            vy = sliced_y[j]
+                            if vy <= 0.01: continue
+                            
+                            # Interaction weight: product of activations
+                            w = float(vx * vy)
+                            if w > 0.005:
                                 links.append({
-                                    "source": f"n-{i}",
-                                    "target": f"n-{j}",
+                                    "source": f"nx-{i}",
+                                    "target": f"ny-{j}",
                                     "weight": w,
                                 })
 
                     # Neuron semantics: track what char each neuron fires for
-                    active_indices = [i for i, v in enumerate(sliced_x) if v > 0]
-                    for i in active_indices:
-                        neuron_semantics.setdefault(i, {})
-                        neuron_semantics[i][token_char] = (
-                            neuron_semantics[i].get(token_char, 0) + 1
+                    # x_sparse = Pattern Detectors, y_sparse = Prediction Units
+                    active_x = [i for i, v in enumerate(sliced_x) if v > 0]
+                    active_y = [i for i, v in enumerate(sliced_y) if v > 0]
+
+                    for i in active_x:
+                        neuron_semantics.setdefault(f"nx-{i}", {})
+                        neuron_semantics[f"nx-{i}"][token_char] = (
+                            neuron_semantics[f"nx-{i}"].get(token_char, 0) + 1
+                        )
+                    for i in active_y:
+                        neuron_semantics.setdefault(f"ny-{i}", {})
+                        neuron_semantics[f"ny-{i}"][token_char] = (
+                            neuron_semantics[f"ny-{i}"].get(token_char, 0) + 1
                         )
 
                     top_labels = {}
-                    for i in active_indices:
-                        if neuron_semantics.get(i):
-                            best = max(
-                                neuron_semantics[i].items(), key=lambda kv: kv[1]
-                            )[0]
-                            top_labels[f"n-{i}"] = f"'{best}' detector"
+                    for nid, counts in neuron_semantics.items():
+                        if not counts: continue
+                        best = max(counts.items(), key=lambda kv: kv[1])[0]
+                        role = "pattern" if nid.startswith("nx") else "predict"
+                        label = "space" if best == " " else best
+                        top_labels[nid] = f"'{label}' {role}"
 
                 # ════════════════════════════════════════════════════════════
                 # GPT-2 INFERENCE — full accumulated context, 50257-token vocab
@@ -270,11 +284,11 @@ def fastapi_app():
                     "token": token_char,
                     "layer": 0,
                     "x_sparse": [
-                        {"id": f"n-{i}", "value": v}
+                        {"id": f"nx-{i}", "value": v}
                         for i, v in enumerate(sliced_x)
                     ],
                     "y_sparse": [
-                        {"id": f"n-{i}", "value": v}
+                        {"id": f"ny-{i}", "value": v}
                         for i, v in enumerate(sliced_y)
                     ],
                     # Real GPT-2 GELU dense activations (all non-zero)

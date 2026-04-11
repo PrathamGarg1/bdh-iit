@@ -46,22 +46,26 @@ export function GraphBrain({
   }, [isFullscreen]);
 
   const graphData = useMemo(() => {
-    const nodes = Array.from({ length: 64 }, (_, i) => ({
-      id: `n-${i}`,
-      group: i % 10 === 0 ? 1 : 2,
-      label: `Neuron ${i}`,
+    // Group 1: nx-0 to nx-63 (Input Pattern Detectors)
+    const inputNodes = Array.from({ length: 64 }, (_, i) => ({
+      id: `nx-${i}`,
+      group: 1,
+      label: `Pattern Neuron ${i}`,
     }));
+
+    // Group 2: ny-0 to ny-63 (Prediction Units)
+    const predictNodes = Array.from({ length: 64 }, (_, i) => ({
+      id: `ny-${i}`,
+      group: 2,
+      label: `Prediction Unit ${i}`,
+    }));
+
+    const nodes = [...inputNodes, ...predictNodes];
 
     const topLinks = topologyLinks
       .sort((a, b) => b.weight - a.weight)
-      .slice(0, 50)
+      .slice(0, 80) // Show a bit more links for richer interaction
       .map(link => ({...link}));
-
-    if (topLinks.length < 5) {
-      for (let i = 0; i < 64; i += 3) {
-        topLinks.push({ source: `n-${i}`, target: `n-${Math.min(63, i+5)}`, weight: 0.1 });
-      }
-    }
 
     return { nodes, links: topLinks };
   }, [topologyLinks]);
@@ -82,34 +86,39 @@ export function GraphBrain({
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const isActive = activeNeuronIds.includes(node.id);
       const semanticLabel = semantics?.[node.id];
+      const isPattern = node.id.startsWith("nx");
 
-      const size = node.group === 1 ? 6 : 4;
-      const glowScale = isActive ? 1.5 : 1;
+      const size = isPattern ? 6 : 5;
+      const glowScale = isActive ? 1.6 : 1;
 
       ctx.beginPath();
       ctx.arc(node.x, node.y, size * glowScale, 0, 2 * Math.PI, false);
 
       if (isActive) {
-        ctx.fillStyle = "#059669";
-        ctx.shadowColor = "rgba(5, 150, 105, 0.5)";
-        ctx.shadowBlur = 12;
+        // Pattern = Emerald, Prediction = Purple
+        const activeColor = isPattern ? "#059669" : "#9333ea";
+        const shadowColor = isPattern ? "rgba(5, 150, 105, 0.5)" : "rgba(147, 51, 234, 0.5)";
+        
+        ctx.fillStyle = activeColor;
+        ctx.shadowColor = shadowColor;
+        ctx.shadowBlur = 15;
       } else {
-        ctx.fillStyle = "#e2e8f0";
-        ctx.strokeStyle = "#94a3b8";
-        ctx.lineWidth = 1;
+        ctx.fillStyle = "#f1f5f9";
+        ctx.strokeStyle = "#cbd5e1";
+        ctx.lineWidth = 0.5;
         ctx.stroke();
         ctx.shadowBlur = 0;
       }
       ctx.fill();
 
       if (isActive && semanticLabel) {
-        const fontSize = Math.max(11, 13 / globalScale);
+        const fontSize = Math.max(10, 12 / globalScale);
         ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.fillStyle = "#047857";
+        ctx.fillStyle = isPattern ? "#065f46" : "#7e22ce";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.shadowBlur = 0;
-        ctx.fillText(semanticLabel, node.x, node.y + size + 4);
+        ctx.fillText(semanticLabel, node.x, node.y + size + 6);
       }
     },
     [activeNeuronIds, semantics]
@@ -153,25 +162,28 @@ export function GraphBrain({
             linkColor={(link: any) => {
               const srcActive = activeNeuronIds.includes(link.source.id || link.source);
               const tgtActive = activeNeuronIds.includes(link.target.id || link.target);
-              if (srcActive && tgtActive) return "rgba(5, 150, 105, 0.85)";
-              if (srcActive || tgtActive) return "rgba(5, 150, 105, 0.35)";
-              return isFullscreen ? "rgba(100, 116, 139, 0.25)" : "rgba(100, 116, 139, 0.35)";
+              if (srcActive && tgtActive) return "rgba(16, 185, 129, 0.75)"; // Emerald-ish
+              if (srcActive || tgtActive) return "rgba(16, 185, 129, 0.2)";
+              return "rgba(148, 163, 184, 0.1)";
             }}
             linkWidth={(link: any) => {
               const srcActive = activeNeuronIds.includes(link.source.id || link.source);
               const tgtActive = activeNeuronIds.includes(link.target.id || link.target);
-              const baseWidth = Math.max(0.5, (link.weight || 0.1) * 1.5);
-              if (srcActive && tgtActive && isReinforcing) return baseWidth + 2;
-              if (srcActive && tgtActive) return baseWidth + 0.8;
-              return baseWidth;
+              
+              // Exponential scaling for the weights to make differences POP
+              const weight = link.weight || 0.1;
+              const baseWidth = 0.5 + Math.pow(weight, 0.5) * 4;
+              
+              if (srcActive && tgtActive) return baseWidth + (isReinforcing ? 2 : 0.5);
+              return baseWidth * 0.5;
             }}
             linkDirectionalParticles={(link: any) => {
               const srcActive = activeNeuronIds.includes(link.source.id || link.source);
               const tgtActive = activeNeuronIds.includes(link.target.id || link.target);
-              return (srcActive && tgtActive) ? 3 : 0;
+              return (srcActive && tgtActive) ? 2 : 0;
             }}
-            linkDirectionalParticleSpeed={0.015}
-            linkDirectionalParticleColor={() => "rgba(5, 150, 105, 0.9)"}
+            linkDirectionalParticleSpeed={0.02}
+            linkDirectionalParticleColor={() => "rgba(16, 185, 129, 1)"}
             d3AlphaDecay={0.01}
             d3VelocityDecay={0.5}
             cooldownTicks={300}

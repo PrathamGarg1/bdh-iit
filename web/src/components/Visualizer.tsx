@@ -168,7 +168,10 @@ export function Visualizer() {
   };
 
   const currentData = dataStream[dataStream.length - 1];
-  const activeActivations = currentData?.x_sparse || [];
+  const activeActivations = [
+    ...(currentData?.x_sparse || []),
+    ...(currentData?.y_sparse || []),
+  ];
 
   return (
     <div className="w-full max-w-[1400px] mx-auto flex flex-col gap-16">
