@@ -62,10 +62,20 @@ export function GraphBrain({
 
     const nodes = [...inputNodes, ...predictNodes];
 
+    // Normalize weights across the current set of links to maximize visual contrast
+    const weights = topologyLinks.map(l => l.weight);
+    const maxW = Math.max(...weights, 1e-9);
+    const minW = Math.min(...weights, maxW * 0.99); // Ensure a range
+    const range = maxW - minW || 1e-9;
+
     const topLinks = topologyLinks
       .sort((a, b) => b.weight - a.weight)
-      .slice(0, 80) // Show a bit more links for richer interaction
-      .map(link => ({...link}));
+      .slice(0, 100) 
+      .map(link => ({
+        ...link,
+        // Relative strength from 0 (thinnest) to 1 (thickest)
+        relWeight: (link.weight - minW) / range
+      }));
 
     return { nodes, links: topLinks };
   }, [topologyLinks]);
@@ -162,25 +172,30 @@ export function GraphBrain({
             linkColor={(link: any) => {
               const srcActive = activeNeuronIds.includes(link.source.id || link.source);
               const tgtActive = activeNeuronIds.includes(link.target.id || link.target);
-              if (srcActive && tgtActive) return "rgba(16, 185, 129, 0.75)"; // Emerald-ish
-              if (srcActive || tgtActive) return "rgba(16, 185, 129, 0.2)";
-              return "rgba(148, 163, 184, 0.1)";
+              
+              if (srcActive && tgtActive) {
+                const opacity = 0.4 + (link.relWeight ?? 0) * 0.55; // 0.4 to 0.95
+                return `rgba(16, 185, 129, ${opacity})`;
+              }
+              if (srcActive || tgtActive) return "rgba(16, 185, 129, 0.15)";
+              return "rgba(148, 163, 184, 0.05)";
             }}
             linkWidth={(link: any) => {
               const srcActive = activeNeuronIds.includes(link.source.id || link.source);
               const tgtActive = activeNeuronIds.includes(link.target.id || link.target);
               
-              // Exponential scaling for the weights to make differences POP
-              const weight = link.weight || 0.1;
-              const baseWidth = 0.5 + Math.pow(weight, 0.5) * 4;
+              // We use relWeight [0, 1] to scale from hairline to very thick
+              const rel = link.relWeight ?? 0.1;
+              const baseWidth = 0.4 + Math.pow(rel, 1.2) * 8; // Max 8.4px width
               
-              if (srcActive && tgtActive) return baseWidth + (isReinforcing ? 2 : 0.5);
-              return baseWidth * 0.5;
+              if (srcActive && tgtActive) return baseWidth + (isReinforcing ? 2 : 0);
+              return baseWidth * 0.3;
             }}
             linkDirectionalParticles={(link: any) => {
               const srcActive = activeNeuronIds.includes(link.source.id || link.source);
               const tgtActive = activeNeuronIds.includes(link.target.id || link.target);
-              return (srcActive && tgtActive) ? 2 : 0;
+              // Only top 50% strength links get particles to reduce noise
+              return (srcActive && tgtActive && (link.relWeight ?? 0) > 0.5) ? 2 : 0;
             }}
             linkDirectionalParticleSpeed={0.02}
             linkDirectionalParticleColor={() => "rgba(16, 185, 129, 1)"}
